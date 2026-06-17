@@ -1,0 +1,135 @@
+/* ============================================================
+   T-Display (ESP32-D0WD) + SHT41 온습도 모니터  v1.0
+   ------------------------------------------------------------
+   - 화면 표시 전용 (Supabase 미연동, 우선 테스트용)
+   - 센서 : SHT41 (I2C)  SDA=GPIO21 / SCL=GPIO22
+   - 배선 : VIN→3V3, GND→GND, SDA→21, SCL→22
+   - 필요 라이브러리
+       1) Adafruit SHT4x  (+ Adafruit BusIO, Adafruit Unified Sensor)
+       2) TFT_eSPI  →  User_Setup_Select.h 에서
+                       #include <User_Setups/Setup25_TTGO_T_Display.h>  활성화
+   - 보드 : ESP32 Dev Module / ESP32 core 2.0.17
+   ============================================================ */
+
+#include <Wire.h>
+#include "Adafruit_SHT4x.h"
+#include <TFT_eSPI.h>
+
+// ── 사용자 설정 ─────────────────────────────
+#define SDA_PIN     21
+#define SCL_PIN     22
+#define TFT_BL_PIN  4          // T-Display 백라이트
+
+const float TEMP_MIN = 18.0;   // 정상 하한 (°C)
+const float TEMP_MAX = 28.0;   // 정상 상한 (°C)
+const float HUMI_MIN = 30.0;   // 정상 하한 (%)
+const float HUMI_MAX = 70.0;   // 정상 상한 (%)
+
+const unsigned long READ_MS = 1000;   // 측정 주기
+// ────────────────────────────────────────────
+
+Adafruit_SHT4x sht4 = Adafruit_SHT4x();
+TFT_eSPI tft = TFT_eSPI();
+
+bool sensorOK = false;
+unsigned long lastRead = 0;
+
+uint16_t tempColor(float t){
+  return (t < TEMP_MIN || t > TEMP_MAX) ? TFT_RED : TFT_GREEN;
+}
+uint16_t humiColor(float h){
+  return (h < HUMI_MIN || h > HUMI_MAX) ? TFT_RED : TFT_CYAN;
+}
+
+void drawStaticUI(){
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextDatum(TL_DATUM);
+  // 라벨
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("TEMPERATURE", 6, 2,  2);
+  tft.drawString("HUMIDITY",    6, 70, 2);
+  // 단위
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("C", 202, 34, 4);
+  tft.drawString("%", 202, 100, 4);
+}
+
+void showError(const char* msg){
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(TFT_RED, TFT_BLACK);
+  tft.drawString("SHT41 ERROR", 120, 45, 4);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(msg, 120, 90, 2);
+}
+
+void setup(){
+  Serial.begin(115200);
+  delay(300);
+
+  pinMode(TFT_BL_PIN, OUTPUT);
+  digitalWrite(TFT_BL_PIN, HIGH);
+
+  tft.init();
+  tft.setRotation(1);                 // 가로 240 x 135
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString("SHT41 MONITOR v1.0", 120, 60, 2);
+  delay(800);
+
+  Wire.begin(SDA_PIN, SCL_PIN);
+  if (sht4.begin(&Wire)){
+    sht4.setPrecision(SHT4X_HIGH_PRECISION);
+    sht4.setHeater(SHT4X_NO_HEATER);
+    sensorOK = true;
+    Serial.println("SHT41 OK");
+    drawStaticUI();
+  } else {
+    sensorOK = false;
+    Serial.println("SHT41 NOT FOUND - check wiring");
+    showError("check SDA21 / SCL22");
+  }
+}
+
+void loop(){
+  // 센서 미연결 → 5초마다 재시도
+  if (!sensorOK){
+    if (millis() - lastRead >= 5000){
+      lastRead = millis();
+      if (sht4.begin(&Wire)){
+        sht4.setPrecision(SHT4X_HIGH_PRECISION);
+        sht4.setHeater(SHT4X_NO_HEATER);
+        sensorOK = true;
+        drawStaticUI();
+      }
+    }
+    return;
+  }
+
+  if (millis() - lastRead < READ_MS) return;
+  lastRead = millis();
+
+  sensors_event_t humidity, temp;
+  if (!sht4.getEvent(&humidity, &temp)){
+    Serial.println("read fail");
+    return;
+  }
+
+  float t = temp.temperature;
+  float h = humidity.relative_humidity;
+  Serial.printf("T=%.1f C   H=%.1f %%\n", t, h);
+
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextPadding(190);                  // 이전 숫자 잔상 제거
+
+  // 온도 (대형 7-세그 폰트)
+  tft.setTextColor(tempColor(t), TFT_BLACK);
+  tft.drawFloat(t, 1, 6, 18, 7);
+
+  // 습도
+  tft.setTextColor(humiColor(h), TFT_BLACK);
+  tft.drawFloat(h, 1, 6, 86, 7);
+
+  tft.setTextPadding(0);
+}
