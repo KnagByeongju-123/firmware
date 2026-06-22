@@ -1,5 +1,7 @@
 /*
- * SHT41 온습도 모니터  v1.11 (검사기와 동일 AP목록)
+ * SHT41 온습도 모니터  v1.12 (현황/이력 저장 분리)
+ *  - 현황(env_current): 1분마다 upsert(덮어쓰기) → 대시보드 실시간
+ *  - 이력(env_log): 1시간마다 insert → 통계/CSV, 30일 보관
  *  - T-Display(세로) 한글표시(온도/습도) : RGB565 pushImage 방식 (XBM 미사용)
  *  - MAC 기반 자동 식별(SHT41_n / 구역)
  *  - 통신을 2번 코어로 분리 -> 화면 지연 없음, 부팅 즉시 측정값 표시
@@ -26,11 +28,12 @@
 
 // WiFi AP는 netTask()에서 등록 (검사기 카운터와 동일 목록)
 
-const char* SB_URL = "https://omngtyewdaqpphnzeate.supabase.co/rest/v1/env_log";
+const char* SB_REST = "https://omngtyewdaqpphnzeate.supabase.co/rest/v1/";
 const char* SB_KEY = "sb_publishable_9j2YkkL-7ul1TrhH-NjVdQ_vWDG2-1D";
 
-const unsigned long SEND_INTERVAL = 60000;
-const unsigned long DISP_INTERVAL = 2000;
+const unsigned long LIVE_INTERVAL = 60000;     // 현황(env_current) 1분
+const unsigned long HIST_INTERVAL = 3600000;   // 이력(env_log) 1시간
+const unsigned long DISP_INTERVAL = 2000;      // 화면 갱신 2초
 
 // 보드 등록표 (MAC -> ID -> 구역코드). 구역코드는 영문/숫자.
 struct DevReg { const char* mac; const char* id; const char* zone; };
@@ -147,28 +150,32 @@ String kstTimestamp() {
   return String(ts);
 }
 
-bool sendToSupabase(float t, float h) {
+// table="env_current"(현황,1분,upsert) / "env_log"(이력,1시간,insert)
+bool sendData(const char* table, bool upsert) {
   if (WiFi.status() != WL_CONNECTED) return false;
   String ts = kstTimestamp();
   String body = "{";
   body += "\"device_id\":\"" + DEVICE_ID + "\",";
   body += "\"zone\":\"" + ZONE + "\",";
-  body += "\"temperature\":" + String(t, 2) + ",";
-  body += "\"humidity\":" + String(h, 2) + ",";
+  body += "\"temperature\":" + String(gTemp, 2) + ",";
+  body += "\"humidity\":" + String(gHumi, 2) + ",";
   body += "\"feels_like\":" + String(gFeel, 2);
   if (ts.length()) body += ",\"measured_at\":\"" + ts + "\"";
   body += "}";
 
+  String url = String(SB_REST) + table;
+  if (upsert) url += "?on_conflict=device_id";
+
   WiFiClientSecure client; client.setInsecure();
   HTTPClient https;
   https.setConnectTimeout(5000);
-  if (!https.begin(client, SB_URL)) return false;
+  if (!https.begin(client, url)) return false;
   https.addHeader("apikey", SB_KEY);
   https.addHeader("Authorization", String("Bearer ") + SB_KEY);
   https.addHeader("Content-Type", "application/json");
-  https.addHeader("Prefer", "return=minimal");
+  https.addHeader("Prefer", upsert ? "resolution=merge-duplicates,return=minimal" : "return=minimal");
   int code = https.POST(body); https.end();
-  Serial.printf("Supabase POST -> %d  %s\n", code, body.c_str());
+  Serial.printf("[%s] POST -> %d\n", table, code);
   return (code == 200 || code == 201 || code == 204);
 }
 
@@ -192,7 +199,7 @@ void netTask(void* p) {
   }
 
   bool ntpDone = false, wasConn = false;
-  unsigned long lastTry = 0, lastSend = 0;
+  unsigned long lastTry = 0, lastLive = 0, lastHist = 0;
   for (;;) {
     if (WiFi.status() != WL_CONNECTED) {
       wasConn = false;
@@ -208,12 +215,13 @@ void netTask(void* p) {
         wasConn = true;
         Serial.printf("[WiFi] 연결됨: %s  RSSI %d  IP %s\n",
           WiFi.SSID().c_str(), WiFi.RSSI(), WiFi.localIP().toString().c_str());
+        if (!ntpDone) { configTime(9 * 3600, 0, "pool.ntp.org", "time.google.com"); ntpDone = true; delay(800); }
+        lastSendOK = sendData("env_current", true);   // 즉시 현황 1건
+        sendData("env_log", false);                    // 즉시 이력 1건
+        lastLive = millis(); lastHist = millis();
       }
-      if (!ntpDone) { configTime(9 * 3600, 0, "pool.ntp.org", "time.google.com"); ntpDone = true; }
-      if (millis() - lastSend >= SEND_INTERVAL) {
-        lastSend = millis();
-        lastSendOK = sendToSupabase(gTemp, gHumi);
-      }
+      if (millis() - lastLive >= LIVE_INTERVAL) { lastLive = millis(); lastSendOK = sendData("env_current", true); }
+      if (millis() - lastHist >= HIST_INTERVAL) { lastHist = millis(); sendData("env_log", false); }
     }
     vTaskDelay(200 / portTICK_PERIOD_MS);
   }
