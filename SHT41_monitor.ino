@@ -1,5 +1,5 @@
 /*
- * SHT41 온습도 모니터  v1.9 (teajin-A 추가)
+ * SHT41 온습도 모니터  v1.11 (검사기와 동일 AP목록)
  *  - T-Display(세로) 한글표시(온도/습도) : RGB565 pushImage 방식 (XBM 미사용)
  *  - MAC 기반 자동 식별(SHT41_n / 구역)
  *  - 통신을 2번 코어로 분리 -> 화면 지연 없음, 부팅 즉시 측정값 표시
@@ -24,12 +24,7 @@
 #define SHT_SDA 21
 #define SHT_SCL 22
 
-const char* WIFI1_SSID = "TAEJIN";
-const char* WIFI1_PASS = "taejinpress";
-const char* WIFI2_SSID = "iptime";
-const char* WIFI2_PASS = "taejinpress";
-const char* WIFI3_SSID = "teajin-A";       // 추가 AP (이 위치에서 TAEJIN 약함)
-const char* WIFI3_PASS = "taejinpress";     // 비번 다르면 수정
+// WiFi AP는 netTask()에서 등록 (검사기 카운터와 동일 목록)
 
 const char* SB_URL = "https://omngtyewdaqpphnzeate.supabase.co/rest/v1/env_log";
 const char* SB_KEY = "sb_publishable_9j2YkkL-7ul1TrhH-NjVdQ_vWDG2-1D";
@@ -179,16 +174,22 @@ bool sendToSupabase(float t, float h) {
 
 // 통신 전담 태스크 (코어0) - 화면(코어1)과 분리
 void netTask(void* p) {
-  wifiMulti.addAP(WIFI1_SSID, WIFI1_PASS);
-  wifiMulti.addAP(WIFI2_SSID, WIFI2_PASS);
-  wifiMulti.addAP(WIFI3_SSID, WIFI3_PASS);
+  // WiFi AP 목록 (검사기 카운터와 동일 + 이 위치 taejin_100)
+  wifiMulti.addAP("TAEJIN",      "taejinpress");
+  wifiMulti.addAP("taejin-A",    "taejinpress");
+  wifiMulti.addAP("taejin_100",  "taejinpress");
+  wifiMulti.addAP("Android0031", "");
+  wifiMulti.addAP("iptime",      "taejinpress");
 
   // [진단] 주변 AP 스캔 출력 (타깃 AP가 보이는지/신호세기 확인)
   int n = WiFi.scanNetworks();
   Serial.printf("[WiFi] 스캔 %d개 발견:\n", n);
-  for (int i = 0; i < n; i++)
-    Serial.printf("   %-22s RSSI %d %s\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i),
-      (WiFi.SSID(i) == WIFI1_SSID || WiFi.SSID(i) == WIFI2_SSID) ? "<== 대상 AP" : "");
+  for (int i = 0; i < n; i++) {
+    String s = WiFi.SSID(i);
+    bool tgt = (s == "TAEJIN" || s == "taejin-A" || s == "taejin_100" ||
+                s == "iptime" || s == "Android0031");
+    Serial.printf("   %-22s RSSI %d %s\n", s.c_str(), WiFi.RSSI(i), tgt ? "<== 대상 AP" : "");
+  }
 
   bool ntpDone = false, wasConn = false;
   unsigned long lastTry = 0, lastSend = 0;
