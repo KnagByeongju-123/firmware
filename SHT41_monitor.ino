@@ -1,5 +1,5 @@
 /*
- * SHT41 온습도 모니터  v1.12 (현황/이력 저장 분리)
+ * SHT41 온습도 모니터  v1.14 (현황/이력 저장 분리, 보드3대 등록)
  *  - 현황(env_current): 1분마다 upsert(덮어쓰기) → 대시보드 실시간
  *  - 이력(env_log): 1시간마다 insert → 통계/CSV, 30일 보관
  *  - T-Display(세로) 한글표시(온도/습도) : RGB565 pushImage 방식 (XBM 미사용)
@@ -39,6 +39,8 @@ const unsigned long DISP_INTERVAL = 2000;      // 화면 갱신 2초
 struct DevReg { const char* mac; const char* id; const char* zone; };
 const DevReg REGISTRY[] = {
   {"5C:01:3B:07:B5:48", "SHT41_1", "B_A"},
+  {"5C:01:3B:07:99:28", "SHT41_2", "B_B"},
+  {"5C:01:3B:07:9F:4C", "SHT41_3", "B_C"},
   // 새 보드 추가: {"MAC", "SHT41_n", "구역코드"},
 };
 const int REG_N = sizeof(REGISTRY) / sizeof(REGISTRY[0]);
