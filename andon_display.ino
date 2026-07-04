@@ -1,5 +1,5 @@
 /*
-  andon_display.ino  v3.13 (다중 메시지 2초 순환·녹색배경)
+  andon_display.ino  v3.18 (시간미동기시 구메시지 표시 방지)
   태진다이텍 현장 안돈 디스플레이 (ESP32 + 2.25" ST7789 76x284 TFT-SPI (가로))
 
   동작
@@ -37,6 +37,7 @@
 #include <Arduino_GFX_Library.h>
 #include "time.h"
 #include "esp_mac.h"
+#include "sumukhwa_img.h"   // 대기중 배경 수묵화 (284x76 RGB565)
 
 // ===== 사용자 설정 =====
 WiFiMulti wifiMulti;   // 신호 센 AP 자동 선택
@@ -49,7 +50,7 @@ AP APS[] = {
 const char* SB_URL  = "https://omngtyewdaqpphnzeate.supabase.co";
 const char* SB_KEY  = "sb_publishable_9j2YkkL-7ul1TrhH-NjVdQ_vWDG2-1D";
 
-const char* HO_CODE = "37";   // ★ 이 디스플레이가 담당할 설비호기 (예 "37"). 보드마다 지정. 빈값이면 미지정
+const char* HO_CODE = "34";   // ★ 이 디스플레이가 담당할 설비호기 (예 "37"). 보드마다 지정. 빈값이면 미지정
 
 const unsigned long SYNC_MS = 30000;   // 동기 주기(폴링+heartbeat 통합). 더 줄이려면 60000(1분)
 
@@ -85,7 +86,7 @@ void blApply() {
 }
 // 새 알림 시 백라이트 5회 밝게 깜빡 (반전: duty0=최대밝기, 255=꺼짐)
 void blBlink5() {
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < 5; i++) {
     ledcWrite(LCD_BL, 0);   delay(120);
     ledcWrite(LCD_BL, 255); delay(120);
   }
@@ -127,7 +128,7 @@ long   msgIds[MSG_MAX];
 int    msgN = 0, cycleIdx = 0;
 long   lastMaxId = -1;
 unsigned long tCycle = 0;
-#define ALERT_BG 0x0320   // 짙은 녹색 배경 (RGB565)
+#define ALERT_BG 0xFFFF   // 흰색 배경 (RGB565)
 
 // ---------- KST 시간 ----------
 String kstNow() {
@@ -162,6 +163,18 @@ void korRight(const String& s, int xRight, int y, uint16_t col) {
 void korAt(const String& s, int x, int y, uint16_t col) {
   fKor(); gfx->setTextColor(col); gfx->setCursor(x, y); gfx->print(s);
 }
+// 굵은 글자: 1px 옆으로 두 번 인쇄 (faux bold)
+void korAtB(const String& s, int x, int y, uint16_t col) {
+  fKor(); gfx->setTextColor(col);
+  gfx->setCursor(x, y); gfx->print(s);
+  gfx->setCursor(x + 1, y); gfx->print(s);
+}
+void korRightB(const String& s, int xRight, int y, uint16_t col) {
+  fKor(); gfx->setTextColor(col);
+  int w = txtW(s);
+  gfx->setCursor(xRight - w, y); gfx->print(s);
+  gfx->setCursor(xRight - w + 1, y); gfx->print(s);
+}
 
 uint16_t levelColor(const String& lv) {
   if (lv == "danger") return C_RED;
@@ -178,6 +191,13 @@ void drawCenterMsg(const String& title, const String& sub, uint16_t col) {
   gfx->fillScreen(BW_B);
   korCenter(title, 34, BW_W);
   if (sub.length()) korCenter(sub, 62, BW_W);
+}
+
+// 대기중: 이미지 배경 + 좌상단 호기·대기중 표시
+void drawIdleImg() {
+  gfx->draw16bitRGBBitmap(0, 0, (uint16_t*)IMG_SUMUK, IMG_W, IMG_H);
+  String ho = String(HO_CODE).length() ? (String(HO_CODE) + "호기") : LABEL4;
+  korAtB(ho + " 대기중", 6, 18, BW_B);
 }
 
 // 가로 284x76 레이아웃:
@@ -218,17 +238,22 @@ void drawAndon(JsonObject o) {
   if (st2.length()) korRight(st2, SCR_W - 4, 64, fg);
 }
 
-// 자유 알림 텍스트 — 짙은 녹색 배경, 흰 글자, 자동 줄바꿈 + (n/총) 순번
+// 자유 알림 텍스트 — 검은 배경, 노란 굵은 글자, 자동 줄바꿈 + (n/총) 순번
+#define ALERT_FG 0xFFE0   // 노란 글자
+void printBold(int x, int y, const String& s) {
+  gfx->setCursor(x, y); gfx->print(s);
+  gfx->setCursor(x + 1, y); gfx->print(s);
+}
 void drawAlert(const String& msg, const String& aat, int idx, int total) {
-  gfx->fillScreen(ALERT_BG);
-  uint16_t fg = C_TXT;                                  // 흰 글자
-  korAt((String(HO_CODE).length() ? String(HO_CODE) + "호기" : LABEL4) + " 알림", 4, 16, fg);
+  gfx->fillScreen(BW_B);                                // 검은 배경
+  uint16_t fg = ALERT_FG;                               // 노란 글자
+  korAtB((String(HO_CODE).length() ? String(HO_CODE) + "호기" : LABEL4) + " 알림", 4, 16, fg);
   String rt = hhmm(aat);
   if (total > 1) rt += "  " + String(idx + 1) + "/" + String(total);
-  if (rt.length()) korRight(rt, SCR_W - 4, 16, fg);
+  if (rt.length()) korRightB(rt, SCR_W - 4, 16, fg);
   gfx->drawFastHLine(4, 22, SCR_W - 8, fg);
   fKor(); gfx->setTextColor(fg);
-  int x = 4, y = 44, lineH = 18, maxW = SCR_W - 8, lines = 0;
+  int x = 4, y = 44, lineH = 18, maxW = SCR_W - 9, lines = 0;
   String word = "", line = "";
   String s = msg + " ";
   for (unsigned i = 0; i < s.length(); ) {
@@ -238,21 +263,21 @@ void drawAlert(const String& msg, const String& aat, int idx, int total) {
     if (ch == " " || ch == "\n") {
       String test = line.length() ? (line + word) : word;
       if (txtW(test) > maxW && line.length()) {
-        gfx->setCursor(x, y); gfx->print(line); y += lineH; if (++lines >= 3) return;
+        printBold(x, y, line); y += lineH; if (++lines >= 3) return;
         line = word + (ch == "\n" ? "" : " ");
       } else {
         line = test + (ch == "\n" ? "" : " ");
       }
-      if (ch == "\n") { gfx->setCursor(x, y); gfx->print(line); y += lineH; if (++lines >= 3) return; line = ""; }
+      if (ch == "\n") { printBold(x, y, line); y += lineH; if (++lines >= 3) return; line = ""; }
       word = "";
     } else {
       word += ch;
       if (txtW(line + word) > maxW) {
-        if (line.length()) { gfx->setCursor(x, y); gfx->print(line); y += lineH; if (++lines >= 3) return; line = ""; }
+        if (line.length()) { printBold(x, y, line); y += lineH; if (++lines >= 3) return; line = ""; }
       }
     }
   }
-  if (line.length()) { gfx->setCursor(x, y); gfx->print(line); }
+  if (line.length()) { printBold(x, y, line); }
 }
 
 // ---------- Supabase 동기: POST upsert(merge) + representation 으로 수신까지 1요청 ----------
@@ -313,7 +338,7 @@ void loadMsgs() {
     JsonObject o = arr[i];
     String at = o["created_at"] | "";
     long age = alertAgeSec(at);
-    if (age >= 0 && age >= ALERT_TTL_SEC) continue;            // 1시간 경과 제외
+    if (age < 0 || age >= ALERT_TTL_SEC) continue;             // 1시간 경과 or 시간미동기 제외
     msgIds[n] = o["id"] | 0;
     msgArr[n] = String((const char*)(o["msg"] | ""));
     msgAt[n]  = at;
@@ -325,7 +350,7 @@ void loadMsgs() {
   if (maxId >= 0) lastMaxId = maxId;
 
   if (msgN == 0) {
-    if (lastSig != "~none~") { lastSig = "~none~"; drawCenterMsg("대기중", String(HO_CODE).length() ? (String(HO_CODE) + "호기") : "미지정", 0); }
+    if (lastSig != "~none~") { lastSig = "~none~"; drawIdleImg(); }
     return;
   }
   if (isNew) {                     // 신규 메시지 도착 → 첫 페이지부터, 깜빡+부저
@@ -345,7 +370,7 @@ void sbSync() {
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n[andon] boot v3.13");
+  Serial.println("\n[andon] boot v3.18");
 
   // 백라이트 PWM (LOW=켜짐 모듈이라 반전 듀티) — 코어 3.x: ledcAttach(핀,주파수,비트)
   ledcAttach(LCD_BL, BL_FREQ, BL_RES);
