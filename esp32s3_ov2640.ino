@@ -208,9 +208,9 @@ void setup() {
     return;
   }
 
-  // 화면 180도 회전 (거꾸로 설치 시). 정상 설치면 둘 다 0 으로.
+  // 좌우 반전만 적용. 상하까지 뒤집으려면 set_vflip 를 1 로.
   sensor_t *s = esp_camera_sensor_get();
-  s->set_vflip(s, 1);
+  s->set_vflip(s, 0);
   s->set_hmirror(s, 1);
 
   setupWiFiList();
