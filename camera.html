@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>검사기 상태확인</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Malgun Gothic", sans-serif;
+         margin: 0; padding: 20px; background: #1c1f26; color: #e8eaed; }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+         background: #262a33; padding: 12px; border-radius: 10px; margin-bottom: 14px; }
+  .sel { display: flex; flex-wrap: wrap; gap: 6px; margin-right: auto; }
+  button { padding: 9px 16px; border: none; border-radius: 8px; font-size: 15px;
+           font-weight: 600; cursor: pointer; color: #fff; background: #3a3f4b; }
+  button:active { transform: translateY(1px); }
+  button.active { background: #2f6fb0; }
+  .all  { background: #555b6b; }
+  .cap  { background: #2f6fb0; }
+  .off  { background: #b23b3b; }
+  .status { margin: 8px 2px 14px; font-size: 14px; color: #8a90a0; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+  .cell { background: #000; border-radius: 10px; overflow: hidden; position: relative; cursor: pointer; }
+  .cell img { width: 100%; display: block; min-height: 220px; background: #000; }
+  .cell .lbl { position: absolute; top: 6px; left: 8px; background: rgba(0,0,0,.6);
+               padding: 4px 12px; border-radius: 6px; font-size: 14px; font-weight: 600; }
+  .single .cell { grid-column: 1 / -1; }
+  .single .cell img { min-height: 420px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>검사기 상태확인</h1>
+
+  <div class="bar">
+    <div class="sel" id="sel"></div>
+    <button class="cap" onclick="capture()">사진 저장</button>
+    <button class="off" onclick="stopCam()">정지</button>
+  </div>
+
+  <div class="status" id="status">카메라를 선택하세요</div>
+  <div class="grid" id="grid"></div>
+</div>
+
+<script>
+  // ===== 카메라 구성 (검사실 1곳당 카메라 1대) =====
+  // id = 보드의 CAM_ID (camera-1.local ...),  desc = 해당 카메라가 비추는 호기
+  const CAMERAS = [
+    { id: 1, name: "카메라1", desc: "3·4호기" },
+    { id: 2, name: "카메라2", desc: "5~8호기" },
+    { id: 3, name: "카메라3", desc: "9·10호기" },
+  ];
+  // .local 이 안 되는 기기는 IP 직접 지정:  1: "192.168.0.51"
+  const IP_MAP = {
+    // 1: "192.168.0.51",
+    // 2: "192.168.0.52",
+    // 3: "192.168.0.53",
+  };
+  // ============================================
+
+  const grid   = document.getElementById('grid');
+  const status = document.getElementById('status');
+  const sel    = document.getElementById('sel');
+  let single   = 0;   // 개별 보기 중인 카메라 id (0=전체)
+
+  function host(id) {
+    return 'http://' + (IP_MAP[id] || ('camera-' + id + '.local'));
+  }
+  function camById(id) { return CAMERAS.find(c => c.id === id); }
+
+  // 카메라 버튼 + 전체 버튼
+  CAMERAS.forEach(c => {
+    const b = document.createElement('button');
+    b.textContent = c.name;
+    b.dataset.id = c.id;
+    b.onclick = () => showSingle(c.id);
+    sel.appendChild(b);
+  });
+  const allBtn = document.createElement('button');
+  allBtn.textContent = '전체';
+  allBtn.className = 'all';
+  allBtn.dataset.id = 'all';
+  allBtn.onclick = showAll;
+  sel.appendChild(allBtn);
+
+  function markActive(key) {
+    document.querySelectorAll('.sel button').forEach(el => el.classList.remove('active'));
+    const b = document.querySelector('.sel button[data-id="' + key + '"]');
+    if (b) b.classList.add('active');
+  }
+
+  function renderCams(list, singleView) {
+    grid.className = 'grid' + (singleView ? ' single' : '');
+    grid.innerHTML = '';
+    list.forEach(c => {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      const img = new Image();
+      img.src = host(c.id) + '/stream?t=' + Date.now();
+      img.onerror = () => { const l = cell.querySelector('.lbl'); if (l) l.textContent = c.name + ' ' + c.desc + ' (연결실패)'; };
+      const lbl = document.createElement('div');
+      lbl.className = 'lbl';
+      lbl.textContent = c.name + ' · ' + c.desc;
+      cell.appendChild(img);
+      cell.appendChild(lbl);
+      cell.onclick = () => showSingle(c.id);
+      grid.appendChild(cell);
+
+      // 접속된 WiFi(SSID) 조회해서 라벨에 추가
+      fetch(host(c.id) + '/info?t=' + Date.now())
+        .then(r => r.json())
+        .then(d => { lbl.textContent = c.name + ' · ' + c.desc + '  [WiFi: ' + d.ssid + ']'; })
+        .catch(() => {});
+    });
+  }
+
+  function showSingle(id) {
+    single = id;
+    markActive(id);
+    const c = camById(id);
+    renderCams([c], true);
+    status.textContent = c.name + ' (' + c.desc + ') 크게 보기';
+  }
+
+  function showAll() {
+    single = 0;
+    markActive('all');
+    renderCams(CAMERAS, false);
+    status.textContent = '전체 보기 · 화면 클릭 시 크게 보기';
+  }
+
+  function stopCam() {
+    document.querySelectorAll('img').forEach(el => el.src = '');
+    grid.innerHTML = '';
+    grid.className = 'grid';
+    status.textContent = '정지됨';
+  }
+
+  function capture() {
+    const id = single > 0 ? single : CAMERAS[0].id;
+    const c = camById(id);
+    const a = document.createElement('a');
+    a.href = host(id) + '/capture?t=' + Date.now();
+    a.download = c.name + '_' + c.desc + '_' + Date.now() + '.jpg';
+    a.target = '_blank';
+    a.click();
+    status.textContent = c.name + ' 사진 캡처 요청됨';
+  }
+
+  showAll();   // 시작 시 전체 보기
+</script>
+</body>
+</html>
