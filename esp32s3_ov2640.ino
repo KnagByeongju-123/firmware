@@ -208,10 +208,10 @@ void setup() {
     return;
   }
 
-  // 좌우 반전만 적용. 상하까지 뒤집으려면 set_vflip 를 1 로.
+  // 상하 반전만 적용. 좌우까지 뒤집으려면 set_hmirror 를 1 로.
   sensor_t *s = esp_camera_sensor_get();
-  s->set_vflip(s, 0);
-  s->set_hmirror(s, 1);
+  s->set_vflip(s, 1);
+  s->set_hmirror(s, 0);
 
   setupWiFiList();
   WiFi.mode(WIFI_STA);
