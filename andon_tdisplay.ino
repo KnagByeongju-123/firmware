@@ -1,5 +1,5 @@
 /*
-  andon_tdisplay.ino  v1.4 (41호기·야자수 대기화면)
+  andon_tdisplay.ino  v1.7 (LED GPIO25 + 야자수 헤더명)
   태진다이텍 현장 안돈 — 작은 디스플레이 스크롤 버전
 
   - andon_msg 테이블에서 1시간 이내 메시지 로드 → 이어붙여 우→좌 스크롤
@@ -23,7 +23,7 @@
 #include <Arduino_GFX_Library.h>
 #include "time.h"
 #include "esp_mac.h"
-#include "tdisplay_img.h"   // 대기중 배경 (240x135 RGB565)
+#include "240_135_sumukhwa_img.h"   // 대기중 배경 (240x135 RGB565)
 
 // ===== 사용자 설정 =====
 WiFiMulti wifiMulti;
@@ -37,7 +37,7 @@ AP APS[] = {
 const char* SB_URL  = "https://omngtyewdaqpphnzeate.supabase.co";
 const char* SB_KEY  = "sb_publishable_9j2YkkL-7ul1TrhH-NjVdQ_vWDG2-1D";
 
-const char* HO_CODE = "45";            // ★ 담당 설비호기
+const char* HO_CODE = "02";            // ★ 담당 설비호기
 
 const unsigned long SYNC_MS = 30000;   // 동기 주기
 #define ALERT_TTL_SEC 3600             // 메시지 1시간 유지
@@ -52,27 +52,27 @@ const unsigned long SYNC_MS = 30000;   // 동기 주기
 #define LCD_MOSI 19
 #define LCD_MISO -1
 #define LCD_BL   4          // HIGH = 켜짐 (일반형)
-#define BUZZER_PIN 17       // 부저(옵션)
+#define TOUCH_PIN 17        // TTP223 터치: VCC-3V3, GND-GND, I/O-GPIO17
+#define LED_PIN   25        // 알림 LED: GPIO25 - 680ohm - LED(+), LED(-) - GND
+const char* NTFY_HOST  = "ntfy.sh";
+const char* NTFY_TOPIC = "taejincall";    // ntfy 앱에서 이 토픽 구독
 
 // ===== 백라이트 =====
 #define BL_FREQ 20000
 #define BL_RES  8
 int BL_BRIGHT = 70;         // 0~100
 void blApply() { ledcWrite(LCD_BL, map(constrain(BL_BRIGHT,0,100),0,100,0,255)); }
-void blBlink() {            // 신규 메시지: 10회 깜빡
-  for (int i = 0; i < 10; i++) { ledcWrite(LCD_BL,255); delay(120); ledcWrite(LCD_BL,0); delay(120); }
+void blBlink() {            // 신규 메시지: 백라이트 10회 + LED 20회 깜빡
+  for (int i = 0; i < 20; i++) {
+    if (i < 10) ledcWrite(LCD_BL,255);
+    digitalWrite(LED_PIN, HIGH); delay(120);
+    if (i < 10) ledcWrite(LCD_BL,0);
+    digitalWrite(LED_PIN, LOW);  delay(120);
+  }
   blApply();
 }
 
-// ===== 부저 =====
-const int BEEP_ON[]  = {90, 90, 90, 350};
-const int BEEP_OFF[] = {80, 80, 80, 250};
-void buzzerBeep() {
-  for (unsigned i = 0; i < sizeof(BEEP_ON)/sizeof(BEEP_ON[0]); i++) {
-    digitalWrite(BUZZER_PIN, HIGH); delay(BEEP_ON[i]);
-    digitalWrite(BUZZER_PIN, LOW);  delay(BEEP_OFF[i]);
-  }
-}
+
 
 // ===== 디스플레이 (ST7789V 135x240 → 가로 240x135) =====
 Arduino_DataBus *bus = new Arduino_ESP32SPI(LCD_DC, LCD_CS, LCD_SCK, LCD_MOSI, LCD_MISO);
@@ -202,7 +202,47 @@ void loadMsgs() {
   scrollText = joined;
   fKor(); gfx->setTextSize(2);
   scrollW = txtW(scrollText) + 2;
-  if (isNew) { scrollX = SCR_W; drawFrame(); blBlink(); buzzerBeep(); }
+  if (isNew) { scrollX = SCR_W; drawFrame(); blBlink(); }
+}
+
+void showToast(const String& t) {
+  gfx->fillScreen(C_BG);
+  fKor(); gfx->setTextSize(2); gfx->setTextColor(C_FG);
+  gfx->setCursor((SCR_W - txtW(t)) / 2, 84); gfx->print(t);
+  gfx->flush();
+}
+
+// 싱글터치: 메시지 해제
+void ackMsgs() {
+  WiFiClientSecure cli; cli.setInsecure();
+  HTTPClient https;
+  String url = String(SB_URL) + "/rest/v1/andon_msg?ho_code=eq." + String(HO_CODE);
+  if (https.begin(cli, url)) {
+    https.addHeader("apikey", SB_KEY);
+    https.addHeader("Authorization", String("Bearer ") + SB_KEY);
+    https.sendRequest("DELETE");
+    https.end();
+  }
+  msgCount = 0; scrollText = ""; scrollW = 0;
+  showToast("해제됨"); delay(800);
+  drawFrame();
+}
+
+// 더블터치: ntfy 호출
+void sendCall() {
+  showToast("호출 전송중");
+  WiFiClientSecure cli; cli.setInsecure();
+  HTTPClient https;
+  String url = String("https://") + NTFY_HOST + "/" + NTFY_TOPIC;
+  if (https.begin(cli, url)) {
+    https.addHeader("Title", String("CALL ") + HO_CODE);   // 제목은 ASCII만
+    https.addHeader("Priority", "high");
+    https.addHeader("Content-Type", "text/plain");
+    https.POST(String(HO_CODE) + "호기 현장 호출");
+    https.end();
+  }
+  showToast("호출 완료"); delay(1200);
+  drawFrame();
 }
 
 void sbSync() {
@@ -215,10 +255,11 @@ void sbSync() {
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n[andonT] boot v1.4");
+  Serial.println("\n[andonT] boot v1.7");
 
   ledcAttach(LCD_BL, BL_FREQ, BL_RES);
-  pinMode(BUZZER_PIN, OUTPUT); digitalWrite(BUZZER_PIN, LOW);
+  pinMode(TOUCH_PIN, INPUT);
+  pinMode(LED_PIN, OUTPUT); digitalWrite(LED_PIN, LOW);
   blApply();
 
   if (!gfx->begin(40000000)) Serial.println("[andonT] gfx begin FAIL");
@@ -262,6 +303,20 @@ void loop() {
   unsigned long now = millis();
   if (WiFi.status() != WL_CONNECTED && now - tWifi >= 10000) { tWifi = now; wifiMulti.run(); }
   if (now - tSync >= SYNC_MS) { tSync = now; sbSync(); }
+
+  // TTP223: 싱글탭=해제, 더블탭=호출 (릴리즈 후 400ms 내 재탭이면 더블)
+  static bool prevT = false;
+  static unsigned long tRel = 0;
+  static int taps = 0;
+  bool curT = (digitalRead(TOUCH_PIN) == HIGH);
+  if (curT && !prevT) { taps++; }                 // 눌림 엣지
+  if (!curT && prevT) { tRel = now; }             // 뗀 시각
+  prevT = curT;
+  if (taps > 0 && !curT && now - tRel > 400) {    // 판정 확정
+    int n = taps; taps = 0;
+    if (n >= 2) sendCall();
+    else if (msgCount > 0) ackMsgs();
+  }
 
   if (msgCount > 0 && now - tFrame >= SCROLL_MS) {
     tFrame = now;
