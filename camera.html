@@ -5,152 +5,270 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>검사기 상태확인</title>
 <style>
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { font-family: -apple-system, "Malgun Gothic", sans-serif;
-         margin: 0; padding: 20px; background: #1c1f26; color: #e8eaed; }
-  .wrap { max-width: 1200px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 0 0 16px; }
-  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-         background: #262a33; padding: 12px; border-radius: 10px; margin-bottom: 14px; }
-  .sel { display: flex; flex-wrap: wrap; gap: 6px; margin-right: auto; }
-  button { padding: 9px 16px; border: none; border-radius: 8px; font-size: 15px;
-           font-weight: 600; cursor: pointer; color: #fff; background: #3a3f4b; }
+         margin: 0; padding: 14px; background: #1c1f26; color: #e8eaed; }
+  .wrap { max-width: 1280px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+
+  .top { position: sticky; top: 0; z-index: 20; background: #1c1f26; padding-bottom: 8px; }
+  .bar { display: flex; gap: 8px; align-items: center;
+         background: #262a33; padding: 10px; border-radius: 12px; }
+  .sel { display: flex; gap: 6px; flex: 1; }
+  button { padding: 11px 12px; border: none; border-radius: 10px; font-size: 15px;
+           font-weight: 700; cursor: pointer; color: #fff; background: #3a3f4b; min-height: 44px; }
   button:active { transform: translateY(1px); }
   button.active { background: #2f6fb0; }
+  .sel button { flex: 1; }
   .all  { background: #555b6b; }
+  .cfg  { background: #6b5bd6; }
   .cap  { background: #2f6fb0; }
   .off  { background: #b23b3b; }
-  .status { margin: 8px 2px 14px; font-size: 14px; color: #8a90a0; }
+  .save { background: #2e7d46; }
+  .status { margin: 8px 2px 12px; font-size: 13px; color: #8a90a0; }
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
-  .cell { background: #000; border-radius: 10px; overflow: hidden; position: relative; cursor: pointer; }
-  .cell img { width: 100%; display: block; min-height: 220px; background: #000; }
-  .cell .lbl { position: absolute; top: 6px; left: 8px; background: rgba(0,0,0,.6);
-               padding: 4px 12px; border-radius: 6px; font-size: 14px; font-weight: 600; }
-  .single .cell { grid-column: 1 / -1; }
-  .single .cell img { min-height: 420px; }
+  /* 썸네일(선택용) */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .cell { background: #000; border-radius: 10px; overflow: hidden; position: relative; cursor: pointer;
+          aspect-ratio: 4 / 3; }
+  .cell img { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
+  .cell .lbl { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.6);
+               padding: 4px 8px; font-size: 12px; font-weight: 700; }
+  .cell .err { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+               color: #ff6b6b; font-size: 12px; font-weight: 700; background: #14171d; }
+  .cell.fail .err { display: flex; }
+
+  /* 라이브 (메인) */
+  .live { display: none; }
+  .live.show { display: block; }
+  .liveimg { width: 100%; border-radius: 10px; background: #000; display: block; }
+  .livebar { margin-bottom: 10px; }
+  .livetitle { font-size: 16px; font-weight: 700; margin-bottom: 8px; word-break: keep-all; }
+  .livebtns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+
+  /* 설정 */
+  .cfgwrap { display: none; }
+  .cfgwrap.show { display: block; }
+  .cfgrow { display: flex; align-items: center; gap: 10px; background: #262a33;
+            padding: 10px 12px; border-radius: 10px; margin-bottom: 8px; }
+  .cfgrow .cn { width: 78px; font-weight: 700; color: #cfe3ff; flex-shrink: 0; }
+  .cfgrow input { flex: 1; padding: 11px 12px; border-radius: 8px; border: 1px solid #3a3f4b;
+                  background: #1c1f26; color: #e8eaed; font-size: 15px; min-width: 0; }
+  .cfgsave { margin: 6px 0 4px; width: 100%; }
+  .hide { display: none; }
+
+  @media (min-width: 600px) {
+    body { padding: 20px; }
+    h1 { font-size: 20px; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+    .sel button { flex: initial; }
+    .livebtns { display: flex; }
+    .livebtns button { flex: initial; }
+    .cfgsave { width: auto; }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>검사기 상태확인</h1>
 
-  <div class="bar">
-    <div class="sel" id="sel"></div>
-    <button class="cap" onclick="capture()">사진 저장</button>
-    <button class="off" onclick="stopCam()">정지</button>
+  <div class="top">
+    <div class="bar">
+      <div class="sel" id="sel"></div>
+      <button class="off" onclick="stopAll()">정지</button>
+    </div>
+  </div>
+  <div class="status" id="status">카메라를 선택하면 라이브 영상이 나옵니다</div>
+
+  <!-- 라이브 (메인) -->
+  <div class="live" id="live">
+    <div class="livebar">
+      <div class="livetitle" id="liveTitle">–</div>
+      <div class="livebtns">
+        <button onclick="livePrev()">◀ 이전</button>
+        <button onclick="liveNext()">다음 ▶</button>
+        <button class="cap" onclick="capture()">사진</button>
+        <button class="all" onclick="showGrid()">목록</button>
+      </div>
+    </div>
+    <img class="liveimg" id="liveImg" alt="">
   </div>
 
-  <div class="status" id="status">카메라를 선택하세요</div>
-  <div class="grid" id="grid"></div>
+  <!-- 목록(썸네일) -->
+  <div class="grid hide" id="grid"></div>
+
+  <!-- 설정 -->
+  <div class="cfgwrap" id="cfgwrap"></div>
 </div>
 
 <script>
-  // ===== 카메라 구성 (검사실 1곳당 카메라 1대) =====
-  // id = 보드의 CAM_ID (camera-1.local ...),  desc = 해당 카메라가 비추는 호기
+  // ===== 카메라 10대 (location 은 설정탭에서 지정, Supabase 저장) =====
   const CAMERAS = [
-    { id: 1, name: "카메라1", desc: "3·4호기" },
-    { id: 2, name: "카메라2", desc: "5~8호기" },
-    { id: 3, name: "카메라3", desc: "9·10호기" },
+    { id: 1,  name: "카메라1",  desc: "1호기"  },
+    { id: 2,  name: "카메라2",  desc: "2호기"  },
+    { id: 3,  name: "카메라3",  desc: "3호기"  },
+    { id: 4,  name: "카메라4",  desc: "4호기"  },
+    { id: 5,  name: "카메라5",  desc: "5호기"  },
+    { id: 6,  name: "카메라6",  desc: "6호기"  },
+    { id: 7,  name: "카메라7",  desc: "7호기"  },
+    { id: 8,  name: "카메라8",  desc: "8호기"  },
+    { id: 9,  name: "카메라9",  desc: "9호기"  },
+    { id: 10, name: "카메라10", desc: "10호기" },
   ];
-  // .local 이 안 되는 기기는 IP 직접 지정:  1: "192.168.0.51"
-  const IP_MAP = {
-    // 1: "192.168.0.51",
-    // 2: "192.168.0.52",
-    // 3: "192.168.0.53",
-  };
-  // ============================================
+  const IP_MAP = { /* 1: "192.168.0.51" */ };
+  const THUMB_INTERVAL = 4000;    // 목록 썸네일 갱신(ms)
 
-  const grid   = document.getElementById('grid');
+  // Supabase (위치 설정 저장/불러오기용)
+  const SUPABASE_URL = "https://omngtyewdaqpphnzeate.supabase.co";
+  const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9tbmd0eWV3ZGFxcHBobnplYXRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4ODk4ODksImV4cCI6MjA5MDQ2NTg4OX0.Zxur3t02JHtOcXforCMSwO3i2mMaf5sViE0tXXUC0-s";
+  const SB_HEAD = { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY };
+
+  const gridEl = document.getElementById('grid');
+  const liveEl = document.getElementById('live');
+  const cfgEl  = document.getElementById('cfgwrap');
   const status = document.getElementById('status');
   const sel    = document.getElementById('sel');
-  let single   = 0;   // 개별 보기 중인 카메라 id (0=전체)
+  const liveImg   = document.getElementById('liveImg');
+  const liveTitle = document.getElementById('liveTitle');
 
-  function host(id) {
-    return 'http://' + (IP_MAP[id] || ('camera-' + id + '.local'));
-  }
+  let mode = 'live', liveId = 1;
+  let thumbTimers = [];
+
+  function host(id) { return 'http://' + (IP_MAP[id] || ('camera-' + id + '.local')); }
   function camById(id) { return CAMERAS.find(c => c.id === id); }
 
-  // 카메라 버튼 + 전체 버튼
-  CAMERAS.forEach(c => {
+  sel.appendChild(mkBtn('목록', 'all', 'grid', showGrid));
+  sel.appendChild(mkBtn('설정', 'cfg', 'cfg', showSettings));
+  function mkBtn(t, cls, id, fn) {
     const b = document.createElement('button');
-    b.textContent = c.name;
-    b.dataset.id = c.id;
-    b.onclick = () => showSingle(c.id);
-    sel.appendChild(b);
-  });
-  const allBtn = document.createElement('button');
-  allBtn.textContent = '전체';
-  allBtn.className = 'all';
-  allBtn.dataset.id = 'all';
-  allBtn.onclick = showAll;
-  sel.appendChild(allBtn);
-
-  function markActive(key) {
+    b.textContent = t; b.className = cls; b.dataset.id = id; b.onclick = fn; return b;
+  }
+  function markActive(k) {
     document.querySelectorAll('.sel button').forEach(el => el.classList.remove('active'));
-    const b = document.querySelector('.sel button[data-id="' + key + '"]');
-    if (b) b.classList.add('active');
+    const b = document.querySelector('.sel button[data-id="' + k + '"]'); if (b) b.classList.add('active');
+  }
+  function clearThumbTimers() { thumbTimers.forEach(t => clearInterval(t)); thumbTimers = []; }
+
+  // ---- 위치(location) 불러오기 ----
+  async function loadConfig() {
+    try {
+      const r = await fetch(SUPABASE_URL + '/rest/v1/camera_config?select=camera_id,location', { headers: SB_HEAD });
+      const rows = await r.json();
+      rows.forEach(row => { const c = camById(row.camera_id); if (c && row.location) c.desc = row.location; });
+    } catch (e) { /* 기본값 유지 */ }
   }
 
-  function renderCams(list, singleView) {
-    grid.className = 'grid' + (singleView ? ' single' : '');
-    grid.innerHTML = '';
-    list.forEach(c => {
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-      const img = new Image();
-      img.src = host(c.id) + '/stream?t=' + Date.now();
-      img.onerror = () => { const l = cell.querySelector('.lbl'); if (l) l.textContent = c.name + ' ' + c.desc + ' (연결실패)'; };
-      const lbl = document.createElement('div');
-      lbl.className = 'lbl';
-      lbl.textContent = c.name + ' · ' + c.desc;
-      cell.appendChild(img);
-      cell.appendChild(lbl);
-      cell.onclick = () => showSingle(c.id);
-      grid.appendChild(cell);
-
-      // 접속된 WiFi(SSID) 조회해서 라벨에 추가
-      fetch(host(c.id) + '/info?t=' + Date.now())
-        .then(r => r.json())
-        .then(d => { lbl.textContent = c.name + ' · ' + c.desc + '  [WiFi: ' + d.ssid + ']'; })
-        .catch(() => {});
-    });
-  }
-
-  function showSingle(id) {
-    single = id;
-    markActive(id);
+  // ================= 라이브 (메인) =================
+  function showLive(id) {
+    mode = 'live'; liveId = id; markActive(null);
+    clearThumbTimers();
+    gridEl.classList.add('hide'); cfgEl.classList.remove('show');
+    liveEl.classList.add('show');
     const c = camById(id);
-    renderCams([c], true);
-    status.textContent = c.name + ' (' + c.desc + ') 크게 보기';
+    liveTitle.textContent = c.name + ' · ' + c.desc + '  (라이브)';
+    liveImg.onerror = () => { liveTitle.textContent = c.name + ' · ' + c.desc + ' (연결실패)'; };
+    liveImg.src = host(id) + '/stream?t=' + Date.now();
+    status.textContent = c.name + ' 라이브 · ◀ ▶ 로 카메라 이동';
+    fetch(host(id) + '/info?t=' + Date.now()).then(r => r.json())
+      .then(d => { liveTitle.textContent = c.name + ' · ' + c.desc + '  [WiFi: ' + d.ssid + ']'; })
+      .catch(() => {});
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
-
-  function showAll() {
-    single = 0;
-    markActive('all');
-    renderCams(CAMERAS, false);
-    status.textContent = '전체 보기 · 화면 클릭 시 크게 보기';
-  }
-
-  function stopCam() {
-    document.querySelectorAll('img').forEach(el => el.src = '');
-    grid.innerHTML = '';
-    grid.className = 'grid';
-    status.textContent = '정지됨';
-  }
+  function liveNext() { const i = CAMERAS.findIndex(c => c.id === liveId); showLive(CAMERAS[(i+1)%CAMERAS.length].id); }
+  function livePrev() { const i = CAMERAS.findIndex(c => c.id === liveId); showLive(CAMERAS[(i-1+CAMERAS.length)%CAMERAS.length].id); }
 
   function capture() {
-    const id = single > 0 ? single : CAMERAS[0].id;
-    const c = camById(id);
+    const c = camById(liveId || CAMERAS[0].id);
     const a = document.createElement('a');
-    a.href = host(id) + '/capture?t=' + Date.now();
+    a.href = host(c.id) + '/capture?t=' + Date.now();
     a.download = c.name + '_' + c.desc + '_' + Date.now() + '.jpg';
-    a.target = '_blank';
-    a.click();
+    a.target = '_blank'; a.click();
     status.textContent = c.name + ' 사진 캡처 요청됨';
   }
 
-  showAll();   // 시작 시 전체 보기
+  // ================= 목록(썸네일 선택) =================
+  function showGrid() {
+    mode = 'grid'; markActive('grid');
+    liveEl.classList.remove('show'); cfgEl.classList.remove('show');
+    gridEl.classList.remove('hide'); liveImg.src = ''; gridEl.innerHTML = '';
+    CAMERAS.forEach(c => {
+      const cell = document.createElement('div');
+      cell.className = 'cell'; cell.id = 'cell-' + c.id;
+      cell.innerHTML =
+        '<img id="thumb-' + c.id + '" alt="">' +
+        '<div class="lbl">' + c.name + ' · ' + c.desc + '</div>' +
+        '<div class="err">연결실패</div>';
+      cell.onclick = () => showLive(c.id);
+      gridEl.appendChild(cell);
+    });
+    startThumbs();
+    status.textContent = '목록 · 카메라를 탭하면 라이브';
+  }
+  function refreshThumb(c) {
+    const img = document.getElementById('thumb-' + c.id);
+    const cell = document.getElementById('cell-' + c.id);
+    if (!img) return;
+    img.onerror = () => { if (cell) cell.classList.add('fail'); };
+    img.onload  = () => { if (cell) cell.classList.remove('fail'); };
+    img.src = host(c.id) + '/capture?t=' + Date.now();
+  }
+  function startThumbs() {
+    clearThumbTimers();
+    const N = CAMERAS.length;
+    CAMERAS.forEach((c, i) => {
+      setTimeout(() => {
+        if (mode === 'grid') refreshThumb(c);
+        const t = setInterval(() => { if (mode === 'grid') refreshThumb(c); }, THUMB_INTERVAL);
+        thumbTimers.push(t);
+      }, Math.round(i * THUMB_INTERVAL / N));
+    });
+  }
+
+  function stopAll() {
+    clearThumbTimers();
+    document.querySelectorAll('img').forEach(el => el.src = '');
+    liveEl.classList.remove('show'); cfgEl.classList.remove('show');
+    gridEl.classList.remove('hide'); gridEl.innerHTML = '';
+    mode = 'grid'; markActive('grid'); status.textContent = '정지됨 · [목록] 을 누르면 재시작';
+  }
+
+  // ================= 설정 (위치 지정) =================
+  function showSettings() {
+    mode = 'cfg'; markActive('cfg');
+    clearThumbTimers();
+    gridEl.classList.add('hide'); liveEl.classList.remove('show'); liveImg.src = '';
+    cfgEl.classList.add('show'); cfgEl.innerHTML = '';
+    CAMERAS.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'cfgrow';
+      row.innerHTML =
+        '<div class="cn">' + c.name + '</div>' +
+        '<input id="loc-' + c.id + '" placeholder="위치/호기명 입력" value="' + (c.desc || '').replace(/"/g,'&quot;') + '">';
+      cfgEl.appendChild(row);
+    });
+    const btn = document.createElement('button');
+    btn.className = 'save cfgsave'; btn.textContent = '저장'; btn.onclick = saveSettings;
+    cfgEl.appendChild(btn);
+    status.textContent = '각 카메라 위치를 입력하고 [저장] (모든 기기 공유)';
+  }
+  async function saveSettings() {
+    status.textContent = '저장 중...';
+    try {
+      for (const c of CAMERAS) {
+        const v = document.getElementById('loc-' + c.id).value.trim();
+        await fetch(SUPABASE_URL + '/rest/v1/camera_config?camera_id=eq.' + c.id, {
+          method: 'PATCH',
+          headers: Object.assign({ 'Content-Type': 'application/json', Prefer: 'return=minimal' }, SB_HEAD),
+          body: JSON.stringify({ location: v, updated_at: new Date().toISOString() })
+        });
+        c.desc = v;
+      }
+      status.textContent = '저장 완료 ✔';
+    } catch (e) { status.textContent = '저장 실패 (인터넷/Supabase 확인)'; }
+  }
+
+  // ===== 시작: 위치 불러오고 1번 카메라 라이브 =====
+  (async () => { await loadConfig(); showLive(1); })();
 </script>
 </body>
 </html>
