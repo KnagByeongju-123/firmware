@@ -12,13 +12,14 @@
  */
 
 #include "esp_camera.h"
+#include "img_converters.h"
 #include <WiFi.h>
 #include <WiFiMulti.h>
 #include <ESPmDNS.h>
 #include "esp_http_server.h"
 
 // ================== 카메라 번호 (보드마다 이 숫자만 변경) ==================
-#define CAM_ID  1     // 1번기=1, 2번기=2, 3번기=3 ...
+#define CAM_ID  1     // 1~10 : 보드마다 1,2,3 ... 10 으로 변경해서 업로드
 // 접속 주소:  http://camera-1.local  (번호에 맞게)
 // =========================================================================
 
@@ -212,6 +213,18 @@ void setup() {
   sensor_t *s = esp_camera_sensor_get();
   s->set_vflip(s, 1);
   s->set_hmirror(s, 0);
+
+  // 오탐 방지: 자동 노출/게인/화이트밸런스 고정 (밝기 출렁임 제거)
+  s->set_whitebal(s, 0);       // AWB 끔
+  s->set_awb_gain(s, 0);
+  s->set_exposure_ctrl(s, 0);  // 자동 노출 끔
+  s->set_aec2(s, 0);
+  s->set_gain_ctrl(s, 0);      // 자동 게인 끔
+  s->set_agc_gain(s, 0);
+  s->set_aec_value(s, 300);    // 고정 노출값(0~1200, 환경에 맞게 조정)
+  s->set_gainceiling(s, GAINCEILING_2X);
+  s->set_brightness(s, 0);
+  s->set_contrast(s, 0);
 
   setupWiFiList();
   WiFi.mode(WIFI_STA);
