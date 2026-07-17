@@ -1,5 +1,5 @@
 /*
-  엘리베이터 제품 상차 알림 수신기 - LILYGO T-Display  v1.9
+  엘리베이터 제품 상차 알림 수신기 - LILYGO T-Display  v2.0
   ============================================================
   기존 안돈(andon_msg 폴링, taejincall)과 완전 분리된 별도 시스템
 
@@ -16,8 +16,8 @@
       · 화면: 검은 배경 + 노란 글자 '엘리베이터 알림' 흐름
       · LED 점멸 + 부저 리듬음
   - 10초 경과 → 자동 해제 (state=false 복귀)
-  - 원터치     → 즉시 알림 해제
-  - 투터치     → 알림 해제 + ntfy 'taejin_qc_call' 에 '수작업 검사실 콜' 전송
+  - 짧게 터치      → 즉시 알림 해제
+  - 길게 누름(1초) → 알림 해제 + ntfy 'taejin_qc_call' 에 '수작업검사실 콜' 전송
   - 대기화면: 검은 배경 + 흰 글자 '대기중' (글자만, 이미지 없음)
 
   [보드 설정 - Arduino IDE]
@@ -67,7 +67,7 @@ const uint8_t  PATTERN_N = sizeof(PATTERN) / sizeof(PATTERN[0]);
 #define BLINK_MS      350UL     // LED 점멸 주기
 #define SCROLL_MS     30UL      // 글자 흐름 속도
 #define SCROLL_STEP   2
-#define TAP_SETTLE    400UL     // 마지막 릴리즈 후 판정 확정 시간
+#define LONG_PRESS_MS 1000UL    // 길게 누름 인정 시간 (1초)
 
 // ===== 서버 =====
 #define LIGHT_ID      "floor2"
@@ -278,29 +278,36 @@ void runBuzzer() {
   patIdx = (patIdx + 1) % PATTERN_N;
 }
 
-// ---------- 터치 (안돈과 동일 방식: 탭 수 카운트 → 릴리즈 후 판정) ----------
+// ---------- 터치: 짧게=해제 / 길게(1초)=콜 ----------
 void handleTouch() {
   static bool prevT = false;
-  static unsigned long tRel = 0;
-  static int taps = 0;
+  static unsigned long tPress = 0;
+  static bool longFired = false;
   unsigned long now = millis();
 
   bool curT = (digitalRead(TOUCH_PIN) == HIGH);
-  if (curT && !prevT) { taps++; }                 // 눌림 엣지
-  if (!curT && prevT) { tRel = now; }             // 뗀 시각
-  prevT = curT;
 
-  if (taps > 0 && !curT && now - tRel > TAP_SETTLE) {   // 판정 확정
-    int n = taps; taps = 0;
-    if (n >= 2) {                                 // 더블탭 → 해제 + 콜
-      Serial.println("[TAP] double -> stop + ntfy");
-      if (alarmOn) stopAlarm();
-      sendNtfy();
-    } else {                                      // 싱글탭 → 해제만
-      Serial.println("[TAP] single -> stop");
-      if (alarmOn) stopAlarm();
-    }
+  if (curT && !prevT) {                 // 눌림 시작
+    tPress = now;
+    longFired = false;
   }
+
+  // 누른 채 1초 경과 → 길게 누름 확정 (떼기 전에 즉시 발동)
+  if (curT && !longFired && now - tPress >= LONG_PRESS_MS) {
+    longFired = true;
+    Serial.println("[TOUCH] long -> stop + ntfy");
+    buzz(true); delay(60); buzz(false);   // 인식 피드백
+    if (alarmOn) stopAlarm();
+    sendNtfy();
+  }
+
+  // 짧게 떼면 해제만
+  if (!curT && prevT && !longFired) {
+    Serial.println("[TOUCH] short -> stop");
+    if (alarmOn) stopAlarm();
+  }
+
+  prevT = curT;
 }
 
 // ---------- 기본 ----------
