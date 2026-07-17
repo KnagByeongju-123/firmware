@@ -1,5 +1,5 @@
 /*
-  엘리베이터 제품 상차 알림 수신기 - LILYGO T-Display  v1.7
+  엘리베이터 제품 상차 알림 수신기 - LILYGO T-Display  v1.9
   ============================================================
   기존 안돈(andon_msg 폴링, taejincall)과 완전 분리된 별도 시스템
 
@@ -67,8 +67,7 @@ const uint8_t  PATTERN_N = sizeof(PATTERN) / sizeof(PATTERN[0]);
 #define BLINK_MS      350UL     // LED 점멸 주기
 #define SCROLL_MS     30UL      // 글자 흐름 속도
 #define SCROLL_STEP   2
-#define TAP_WINDOW    400UL     // 투터치 인정 간격 (0.4초)
-#define TAP_DEBOUNCE  250UL
+#define TAP_SETTLE    400UL     // 마지막 릴리즈 후 판정 확정 시간
 
 // ===== 서버 =====
 #define LIGHT_ID      "floor2"
@@ -98,9 +97,6 @@ uint8_t  patIdx = 0;
 unsigned long patNext = 0;
 
 unsigned long msgUntil = 0;
-unsigned long lastTap = 0, firstTap = 0;
-uint8_t  tapCount = 0;
-bool     touchPrev = false;
 
 // ---------- 부저 ----------
 void buzz(bool on) {
@@ -282,27 +278,28 @@ void runBuzzer() {
   patIdx = (patIdx + 1) % PATTERN_N;
 }
 
-// ---------- 터치 ----------
+// ---------- 터치 (안돈과 동일 방식: 탭 수 카운트 → 릴리즈 후 판정) ----------
 void handleTouch() {
-  bool now = (digitalRead(TOUCH_PIN) == HIGH);
+  static bool prevT = false;
+  static unsigned long tRel = 0;
+  static int taps = 0;
+  unsigned long now = millis();
 
-  if (now && !touchPrev && millis() - lastTap > TAP_DEBOUNCE) {
-    lastTap = millis();
-    if (tapCount == 0) { tapCount = 1; firstTap = millis(); }
-    else if (millis() - firstTap <= TAP_WINDOW) {
-      tapCount = 0;                       // 투터치 확정 → 해제 + 콜
+  bool curT = (digitalRead(TOUCH_PIN) == HIGH);
+  if (curT && !prevT) { taps++; }                 // 눌림 엣지
+  if (!curT && prevT) { tRel = now; }             // 뗀 시각
+  prevT = curT;
+
+  if (taps > 0 && !curT && now - tRel > TAP_SETTLE) {   // 판정 확정
+    int n = taps; taps = 0;
+    if (n >= 2) {                                 // 더블탭 → 해제 + 콜
       Serial.println("[TAP] double -> stop + ntfy");
       if (alarmOn) stopAlarm();
       sendNtfy();
+    } else {                                      // 싱글탭 → 해제만
+      Serial.println("[TAP] single -> stop");
+      if (alarmOn) stopAlarm();
     }
-  }
-  touchPrev = now;
-
-  // 투터치 대기 경과 → 원터치 확정 → 해제만
-  if (tapCount == 1 && millis() - firstTap > TAP_WINDOW) {
-    tapCount = 0;
-    Serial.println("[TAP] single -> stop");
-    if (alarmOn) stopAlarm();
   }
 }
 
