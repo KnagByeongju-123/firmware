@@ -1,18 +1,18 @@
 /*
-  엘리베이터 제품 상차 알림 수신기 - LILYGO T-Display  v2.0
+  엘리베이터 제품 상차 알림 수신기 - LILYGO T-Display  v2.1
   ============================================================
   기존 안돈(andon_msg 폴링, taejincall)과 완전 분리된 별도 시스템
 
     구분          기존 안돈            본 기기
     ------------------------------------------------
     테이블        andon_msg            call_light (id='floor2')
-    폴링          30초                 2초
+    폴링          30초                 30초
     알림          메시지 표시          10초 알림 후 자동 해제
     ntfy          taejincall           taejin_qc_call
 
   [동작]
   - index.html El 클릭 → call_light.state=true
-  - 2초 폴링 감지 → 10초 알림
+  - 30초 폴링 감지 → 10초 알림
       · 화면: 검은 배경 + 노란 글자 '엘리베이터 알림' 흐름
       · LED 점멸 + 부저 리듬음
   - 10초 경과 → 자동 해제 (state=false 복귀)
@@ -62,7 +62,7 @@ const uint16_t PATTERN[] = { 60, 70, 60, 70, 60, 70, 60, 620 };
 const uint8_t  PATTERN_N = sizeof(PATTERN) / sizeof(PATTERN[0]);
 
 // ===== 동작 =====
-#define POLL_MS       2000UL    // Supabase 폴링
+#define POLL_MS       30000UL   // Supabase 폴링 (2초→30초, 요청량 절감)
 #define ALARM_MS      10000UL   // 알림 유지 10초
 #define BLINK_MS      350UL     // LED 점멸 주기
 #define SCROLL_MS     30UL      // 글자 흐름 속도
@@ -335,6 +335,7 @@ void setup() {
 
   wifiMulti.addAP("taejin-A", "taejinpress");
   wifiMulti.addAP("TAEJIN", "taejinpress");
+  wifiMulti.addAP("Android", "");
   wifiMulti.addAP("U+NetC2B3", "4151007221");
 
   Serial.print("WiFi connecting");
