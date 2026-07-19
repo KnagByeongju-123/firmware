@@ -59,6 +59,7 @@ Preferences    prefs;
 
 // 카운터 상태
 long   dailyCount   = 0;
+long   totalCount   = 0;      // 누적 총계(자정에도 리셋 안 됨)
 String currentDate  = "";
 
 // 입력 디바운스
@@ -100,10 +101,12 @@ String clockStr() {
 // ---------- NVS ----------
 void saveNvs() {
   prefs.putLong("cnt", dailyCount);
+  prefs.putLong("tot", totalCount);
   prefs.putString("date", currentDate);
 }
 void loadNvs() {
   dailyCount  = prefs.getLong("cnt", 0);
+  totalCount  = prefs.getLong("tot", 0);
   currentDate = prefs.getString("date", "");
 }
 
@@ -113,6 +116,7 @@ bool supabasePost(const char* table, const String& body, bool merge) {
   WiFiClientSecure cli; cli.setInsecure();
   HTTPClient https;
   String url = String(SUPABASE_URL) + "/rest/v1/" + table;
+  if (merge) url += "?on_conflict=device_id,count_date";
   if (!https.begin(cli, url)) { Serial.println("[POST] begin fail"); return false; }
   https.addHeader("apikey", SUPABASE_KEY);
   https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
@@ -125,10 +129,11 @@ bool supabasePost(const char* table, const String& body, bool merge) {
   return (code == 200 || code == 201 || code == 204);
 }
 
-void pushData(const String& d, long c) {
+void pushData(const String& d, long dcnt, long tcnt) {
   String body = "{\"device_id\":\"" + String(DEVICE_ID) +
                 "\",\"count_date\":\"" + d +
-                "\",\"daily_count\":" + String(c) + "}";
+                "\",\"daily_count\":" + String(dcnt) +
+                ",\"total_count\":" + String(tcnt) + "}";
   bool a = supabasePost(TABLE_DAILY, body, true);   // 일별 upsert
   bool b = supabasePost(TABLE_LOG,   body, false);  // 60초 로그 insert
   pushOk = a && b;
@@ -192,6 +197,7 @@ void handleSignal() {
       stableState = reading;
       if (stableState == ACT_LEVEL) {     // 활성 에지 = 1카운트
         dailyCount++;
+        totalCount++;
       }
     }
   }
@@ -203,9 +209,9 @@ void checkRollover() {
   String today = dateStr();
   if (currentDate == "") { currentDate = today; saveNvs(); return; }
   if (today != currentDate) {
-    pushData(currentDate, dailyCount);   // 전일 마감 전송
+    pushData(currentDate, dailyCount, totalCount);   // 전일 마감 전송
     currentDate = today;
-    dailyCount = 0;
+    dailyCount = 0;                                   // 당일만 리셋
     lastPushedCount = 0;
     lastDrawnCount = -999999;
     saveNvs();
@@ -254,7 +260,7 @@ void setup() {
                 WiFi.status() == WL_CONNECTED, timeReady(), dateStr().c_str());
   if (timeReady()) {
     currentDate = dateStr();
-    pushData(currentDate, dailyCount);   // 테스트 1회
+    pushData(currentDate, dailyCount, totalCount);   // 테스트 1회
     if (pushOk) lastPushedCount = dailyCount;
   }
 
@@ -282,7 +288,7 @@ void loop() {
   // 60초 업로드 — 카운트가 증가했을 때만, 성공 시에만 확정
   if (millis() - lastPush > PUSH_INTERVAL) {
     if (currentDate != "" && dailyCount != lastPushedCount) {
-      pushData(currentDate, dailyCount);
+      pushData(currentDate, dailyCount, totalCount);
       if (pushOk) lastPushedCount = dailyCount;   // 실패시 다음 주기 재시도
     }
     lastPush = millis();
