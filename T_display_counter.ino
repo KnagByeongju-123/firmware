@@ -38,14 +38,14 @@
 #include <time.h>
 
 // ==================== 설정 ====================
-const char* DEVICE_ID = "KY_1Fa_Prod_1";      // 설정 고유번호(설정번호)
+const char* DEVICE_ID = "1공장_생산_1호기";      // 설정 고유번호(설정번호)
 
 const int   SIGNAL_PIN  = 25;                     // GPIO25
 const bool  ACTIVE_LOW  = true;                   // SSR가 GND로 당기면 true
 const unsigned long DEBOUNCE_MS = 30;             // 채터링 제거(ms)
 
-const char* SUPABASE_URL   = "https://YOUR_ETC_PROJECT.supabase.co";
-const char* SUPABASE_KEY   = "sb_publishable_YOUR_ETC_KEY";
+const char* SUPABASE_URL   = "https://jgvikmakenpllwxwdugk.supabase.co";
+const char* SUPABASE_KEY   = "sb_publishable_sKp-6nz2PQ9LxQ5pF-nYkg_YwoEJN6S";
 const char* TABLE_DAILY    = "counter_daily";     // 일별 누적(upsert)
 const char* TABLE_LOG      = "counter_log";       // 60초 로그
 
@@ -109,16 +109,18 @@ void loadNvs() {
 
 // ---------- 업로드 ----------
 bool supabasePost(const char* table, const String& body, bool merge) {
-  if (WiFi.status() != WL_CONNECTED) return false;
+  if (WiFi.status() != WL_CONNECTED) { Serial.println("[POST] WiFi X"); return false; }
   WiFiClientSecure cli; cli.setInsecure();
   HTTPClient https;
   String url = String(SUPABASE_URL) + "/rest/v1/" + table;
-  if (!https.begin(cli, url)) return false;
+  if (!https.begin(cli, url)) { Serial.println("[POST] begin fail"); return false; }
   https.addHeader("apikey", SUPABASE_KEY);
   https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
   https.addHeader("Content-Type", "application/json");
   https.addHeader("Prefer", merge ? "resolution=merge-duplicates" : "return=minimal");
   int code = https.POST(body);
+  String resp = https.getString();
+  Serial.printf("[POST] %s  code=%d  resp=%s\n", table, code, resp.c_str());
   https.end();
   return (code == 200 || code == 201 || code == 204);
 }
@@ -211,12 +213,23 @@ void checkRollover() {
 }
 
 void setup() {
+  Serial.begin(115200);
+  delay(300);
+
   pinMode(SIGNAL_PIN, ACTIVE_LOW ? INPUT_PULLUP : INPUT_PULLDOWN);
   lastReading = digitalRead(SIGNAL_PIN);
   stableState = lastReading;
 
+  pinMode(4, OUTPUT);          // T-Display 백라이트
+  digitalWrite(4, HIGH);
+
   tft.init();
   tft.setRotation(1);
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("BOOT", 120, 67, 4);   // 부팅 확인용 (여기까지 나오면 화면 정상)
+  delay(800);
   tft.fillScreen(TFT_BLACK);
   u8f.begin(tft);
 
@@ -234,6 +247,16 @@ void setup() {
   wifiMulti.run(8000);
 
   configTime(9 * 3600, 0, "pool.ntp.org", "time.google.com", "time.nist.gov");
+
+  // NTP 최대 6초 대기 후 즉시 테스트 전송(디버그)
+  for (int i = 0; i < 60 && !timeReady(); i++) delay(100);
+  Serial.printf("[BOOT] wifi=%d time=%d date=%s\n",
+                WiFi.status() == WL_CONNECTED, timeReady(), dateStr().c_str());
+  if (timeReady()) {
+    currentDate = dateStr();
+    pushData(currentDate, dailyCount);   // 테스트 1회
+    if (pushOk) lastPushedCount = dailyCount;
+  }
 
   lastPush = millis();
 }
@@ -256,11 +279,11 @@ void loop() {
     lastNvs = millis();
   }
 
-  // 60초 업로드 — 카운트가 증가했을 때만
+  // 60초 업로드 — 카운트가 증가했을 때만, 성공 시에만 확정
   if (millis() - lastPush > PUSH_INTERVAL) {
     if (currentDate != "" && dailyCount != lastPushedCount) {
       pushData(currentDate, dailyCount);
-      lastPushedCount = dailyCount;
+      if (pushOk) lastPushedCount = dailyCount;   // 실패시 다음 주기 재시도
     }
     lastPush = millis();
   }
