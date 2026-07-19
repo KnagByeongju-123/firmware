@@ -60,6 +60,7 @@ Preferences    prefs;
 // 카운터 상태
 long   dailyCount   = 0;
 long   totalCount   = 0;      // 누적 총계(자정에도 리셋 안 됨)
+int64_t lastResetSeq = 0;     // 마감처리 리셋 명령 시퀀스
 String currentDate  = "";
 
 // 입력 디바운스
@@ -105,9 +106,10 @@ void saveNvs() {
   prefs.putString("date", currentDate);
 }
 void loadNvs() {
-  dailyCount  = prefs.getLong("cnt", 0);
-  totalCount  = prefs.getLong("tot", 0);
-  currentDate = prefs.getString("date", "");
+  dailyCount   = prefs.getLong("cnt", 0);
+  totalCount   = prefs.getLong("tot", 0);
+  lastResetSeq = prefs.getLong64("rseq", 0);
+  currentDate  = prefs.getString("date", "");
 }
 
 // ---------- 업로드 ----------
@@ -138,6 +140,53 @@ void pushData(const String& d, long dcnt, long tcnt) {
   bool b = supabasePost(TABLE_LOG,   body, false);  // 60초 로그 insert
   pushOk = a && b;
   lastPushClock = clockStr().substring(0, 5);
+}
+
+// URL 인코딩(한글 device_id 쿼리용)
+String urlEncode(const String& s) {
+  String out; char buf[4];
+  for (size_t i = 0; i < s.length(); i++) {
+    uint8_t c = s[i];
+    if (isalnum(c) || c=='-' || c=='_' || c=='.' || c=='~') out += (char)c;
+    else { sprintf(buf, "%%%02X", c); out += buf; }
+  }
+  return out;
+}
+
+// 마감처리 리셋 명령 폴링
+void pollCommand() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClientSecure cli; cli.setInsecure();
+  HTTPClient https;
+  String url = String(SUPABASE_URL) + "/rest/v1/counter_command?device_id=eq." +
+               urlEncode(DEVICE_ID) + "&select=reset_seq";
+  if (!https.begin(cli, url)) return;
+  https.addHeader("apikey", SUPABASE_KEY);
+  https.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
+  int code = https.GET();
+  if (code == 200) {
+    String r = https.getString();
+    int i = r.indexOf("reset_seq");
+    if (i >= 0) { i = r.indexOf(':', i);
+      if (i >= 0) {
+        int64_t seq = atoll(r.c_str() + i + 1);
+        if (seq > lastResetSeq) {
+          lastResetSeq = seq;
+          dailyCount = 0;                       // 당일만 리셋(누적 유지)
+          lastDrawnCount = -999999;
+          prefs.putLong64("rseq", lastResetSeq);
+          saveNvs();
+          https.end();
+          if (currentDate != "") {              // 즉시 0 전송
+            pushData(currentDate, dailyCount, totalCount);
+            if (pushOk) lastPushedCount = dailyCount;
+          }
+          return;
+        }
+      }
+    }
+  }
+  https.end();
 }
 
 // ---------- 디스플레이 ----------
@@ -274,6 +323,13 @@ void loop() {
   if (millis() - lastWifiRun > 5000) {
     wifiMulti.run();
     lastWifiRun = millis();
+  }
+
+  // 마감처리 리셋 명령 확인(5초)
+  static unsigned long lastCmd = 0;
+  if (millis() - lastCmd > 5000) {
+    pollCommand();
+    lastCmd = millis();
   }
 
   checkRollover();
